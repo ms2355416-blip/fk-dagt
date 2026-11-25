@@ -42,7 +42,14 @@ summary .t{font-weight:600}
 #prev{display:none;margin-top:14px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
 #prev header{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);gap:8px}
 #prev pre{margin:0;padding:12px;max-height:340px;overflow:auto;direction:ltr;text-align:left;font-size:.82rem;white-space:pre-wrap;word-break:break-all}
-#msg{color:#ff8a80;margin-top:10px;min-height:1.4em}
+nav{display:flex;gap:8px;margin-bottom:16px}
+nav button{flex:1}
+nav button.on{background:var(--acc);color:#04130a;border-color:var(--acc);font-weight:700}
+.field{display:flex;gap:8px;align-items:center;margin:12px 0}
+.field input{flex:1;font:inherit;padding:9px 12px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text);direction:ltr}
+.pick{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+progress{width:100%;height:8px;margin-top:10px;display:none}
+#msg,#cmsg{color:#ff8a80;margin-top:10px;min-height:1.4em}
 </style>
 </head>
 <body>
@@ -50,6 +57,12 @@ summary .t{font-weight:600}
   <h1>فك ضغط ملفات ZIP</h1>
   <p class="sub">كل شيء يتم على جهازك. لا يتم رفع أي ملف لأي سيرفر.</p>
 
+  <nav>
+    <button id="tEx" class="on">فك ضغط</button>
+    <button id="tCp">ضغط ملفات</button>
+  </nav>
+
+  <div id="ex">
   <div id="drop" tabindex="0" role="button" aria-label="اختر ملف ZIP">
     <b>اسحب ملف ZIP هنا أو اضغط للاختيار</b>
     <span>ملف .zip فقط</span>
@@ -64,7 +77,7 @@ summary .t{font-weight:600}
     <div class="choices">
       <div class="choice">
         <h3>الخيار الأول: ملف كامل</h3>
-        <p>تحميل كل المحتويات في ملف ZIP واحد بعد فك الضغط.</p>
+        <p>حفظ كل المحتويات في مجلد باسم الملف المرفوع (ZIP).</p>
         <button class="main" id="dlAll">تحميل الكل</button>
       </div>
       <div class="choice">
@@ -83,6 +96,29 @@ summary .t{font-weight:600}
       </div>
     </div>
   </section>
+  </div>
+
+  <div id="cp" style="display:none">
+    <div class="choice">
+      <h3>اختار الملفات اللي عايز تضغطها</h3>
+      <p>تقدر تختار ملفات كتير، أو مجلد كامل.</p>
+      <div class="pick">
+        <button class="main" id="pFiles">اختيار ملفات</button>
+        <button id="pDir">اختيار مجلد</button>
+      </div>
+      <input id="cFiles" type="file" multiple hidden>
+      <input id="cDir" type="file" webkitdirectory hidden>
+    </div>
+    <div id="cBox" style="display:none">
+      <div class="stats" id="cStats" style="margin-top:14px"></div>
+      <div id="cList"></div>
+      <div class="field"><input id="cName" value="archive" aria-label="اسم الملف"><b>.zip</b></div>
+      <button class="main" id="cGo">ضغط وتحميل</button>
+      <button id="cClear">مسح الكل</button>
+      <progress id="cProg" max="100" value="0"></progress>
+    </div>
+    <div id="cmsg" role="alert"></div>
+  </div>
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -210,11 +246,43 @@ summary .t{font-weight:600}
     save(await z.generateAsync({type:'blob'}), dir.replace(/\/$/,'').split('/').pop() + '.zip');
   }
 
+  async function writeTo(dir, e){
+    var parts = e.path.split('/'), nm = parts.pop(), d = dir;
+    for(var i=0;i<parts.length;i++) d = await d.getDirectoryHandle(parts[i], {create:true});
+    var fh = await d.getFileHandle(nm, {create:true});
+    var w = await fh.createWritable();
+    await w.write(await e.obj.async('blob'));
+    await w.close();
+  }
   $('dlAll').onclick = async function(){
-    var b = $('dlAll'); b.disabled = true; b.textContent = 'جاري التجهيز...';
-    var z = new JSZip();
-    for(var i=0;i<entries.length;i++) z.file(entries[i].path, await entries[i].obj.async('uint8array'));
-    save(await z.generateAsync({type:'blob', compression:'DEFLATE'}), zipName + '-extracted.zip');
+    var b = $('dlAll'); b.disabled = true; say('');
+    try{
+      if(window.showDirectoryPicker){
+        var root = await window.showDirectoryPicker({mode:'readwrite'});
+        var out = await root.getDirectoryHandle(zipName, {create:true});
+        for(var i=0;i<entries.length;i++){
+          b.textContent = 'جاري الحفظ ' + (i+1) + '/' + entries.length;
+          await writeTo(out, entries[i]);
+        }
+        say('');
+        b.textContent = 'تم الحفظ في مجلد ' + zipName;
+        setTimeout(function(){ b.textContent = 'تحميل الكل'; b.disabled = false; }, 2500);
+        return;
+      }
+      // fallback: متصفحات الموبايل لا تسمح بإنشاء مجلد، فنحمّل الملفات واحد واحد
+      var seen = {};
+      for(var j=0;j<entries.length;j++){
+        var e = entries[j], nm = base(e.path);
+        if(seen[nm]) nm = e.path.replace(/\//g,'_');
+        seen[nm] = 1;
+        b.textContent = 'جاري التحميل ' + (j+1) + '/' + entries.length;
+        save(await e.obj.async('blob'), nm);
+        await new Promise(function(r){ setTimeout(r, 350); });
+      }
+      say('المتصفح ده مش بيسمح بإنشاء مجلد، فاتحملت الملفات واحد واحد. لو ظهر طلب السماح بتحميلات متعددة اضغط سماح.');
+    }catch(err){
+      if(err && err.name !== 'AbortError') say('حصل خطأ أثناء الحفظ: ' + err.message);
+    }
     b.disabled = false; b.textContent = 'تحميل الكل';
   };
   $('showSep').onclick = function(){ $('sepBox').style.display = 'block'; $('sepBox').scrollIntoView({behavior:'smooth'}); };
@@ -235,6 +303,68 @@ summary .t{font-weight:600}
   ['dragenter','dragover'].forEach(function(ev){ drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.add('over'); }); });
   ['dragleave','drop'].forEach(function(ev){ drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.remove('over'); }); });
   drop.addEventListener('drop', function(e){ load(e.dataTransfer.files[0]); });
+
+  // ---- ضغط الملفات ----
+  var picked = [];
+  function setTab(ex){
+    $('ex').style.display = ex ? '' : 'none';
+    $('cp').style.display = ex ? 'none' : '';
+    $('tEx').classList.toggle('on', ex);
+    $('tCp').classList.toggle('on', !ex);
+  }
+  $('tEx').onclick = function(){ setTab(true); };
+  $('tCp').onclick = function(){ setTab(false); };
+  $('pFiles').onclick = function(){ $('cFiles').click(); };
+  $('pDir').onclick = function(){ $('cDir').click(); };
+  function add(list){
+    Array.prototype.forEach.call(list, function(f){
+      var p = f.webkitRelativePath || f.name;
+      if(!picked.some(function(x){return x.path === p})) picked.push({path:p, file:f});
+    });
+    if(list.length && list[0].webkitRelativePath){
+      $('cName').value = list[0].webkitRelativePath.split('/')[0];
+    }
+    drawPicked();
+  }
+  $('cFiles').onchange = function(){ add(this.files); this.value = ''; };
+  $('cDir').onchange = function(){ add(this.files); this.value = ''; };
+  function drawPicked(){
+    $('cmsg').textContent = '';
+    $('cBox').style.display = picked.length ? 'block' : 'none';
+    var tot = picked.reduce(function(s,x){return s + x.file.size}, 0);
+    $('cStats').textContent = picked.length + ' ملف، الحجم ' + size(tot);
+    var out = $('cList'); out.innerHTML = '';
+    picked.forEach(function(x, i){
+      var r = document.createElement('div'); r.className = 'row';
+      r.style.border = '1px solid var(--line)'; r.style.borderRadius = '10px';
+      r.style.marginBottom = '6px'; r.style.background = 'var(--panel)';
+      var n = document.createElement('div'); n.className = 'name'; n.textContent = x.path;
+      n.style.direction = 'ltr';
+      var sm = document.createElement('small'); sm.textContent = size(x.file.size); n.appendChild(sm);
+      var rb = document.createElement('button'); rb.textContent = 'حذف'; rb.style.padding = '5px 10px';
+      rb.onclick = function(){ picked.splice(i,1); drawPicked(); };
+      r.appendChild(n); r.appendChild(rb); out.appendChild(r);
+    });
+  }
+  $('cClear').onclick = function(){ picked = []; drawPicked(); };
+  $('cGo').onclick = async function(){
+    if(typeof JSZip === 'undefined'){ $('cmsg').textContent = 'تعذر تحميل مكتبة الضغط. تأكد من الاتصال بالإنترنت.'; return; }
+    var b = $('cGo'), pr = $('cProg'); b.disabled = true; pr.style.display = 'block'; pr.value = 0;
+    try{
+      var z = new JSZip();
+      picked.forEach(function(x){ z.file(x.path, x.file); });
+      var blob = await z.generateAsync({type:'blob', compression:'DEFLATE', compressionOptions:{level:6}},
+        function(m){ pr.value = m.percent; });
+      var name = ($('cName').value.trim() || 'archive').replace(/\.zip$/i,'').replace(/[\\/:*?"<>|]/g,'_');
+      save(blob, name + '.zip');
+      $('cmsg').style.color = 'var(--acc)';
+      $('cmsg').textContent = 'تم الضغط: ' + size(blob.size) + ' بدل ' + size(picked.reduce(function(s,x){return s + x.file.size}, 0));
+    }catch(err){
+      $('cmsg').style.color = '#ff8a80';
+      $('cmsg').textContent = 'حصل خطأ أثناء الضغط: ' + err.message;
+    }
+    b.disabled = false; pr.style.display = 'none';
+  };
 })();
 </script>
 </body>
