@@ -60,6 +60,7 @@ progress{width:100%;height:8px;margin-top:10px;display:none}
   <nav>
     <button id="tEx" class="on">فك ضغط</button>
     <button id="tCp">ضغط ملفات</button>
+    <button id="tGh">رفع على GitHub</button>
   </nav>
 
   <div id="ex">
@@ -118,6 +119,33 @@ progress{width:100%;height:8px;margin-top:10px;display:none}
       <progress id="cProg" max="100" value="0"></progress>
     </div>
     <div id="cmsg" role="alert"></div>
+  </div>
+  <div id="gh" style="display:none">
+    <div class="choice">
+      <h3>اختار اللي عايز ترفعه</h3>
+      <p>ملف ZIP (هيتفك تلقائي)، أو ملفات، أو مجلد كامل.</p>
+      <div class="pick">
+        <button class="main" id="gZip">ملف ZIP</button>
+        <button id="gFiles">ملفات</button>
+        <button id="gDir">مجلد</button>
+      </div>
+      <input id="gzIn" type="file" accept=".zip,application/zip" hidden>
+      <input id="gfIn" type="file" multiple hidden>
+      <input id="gdIn" type="file" webkitdirectory hidden>
+    </div>
+    <div id="gBox" style="display:none">
+      <div class="stats" id="gStats" style="margin-top:14px"></div>
+      <label style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><input type="checkbox" id="gStrip"> <span id="gStripT">إزالة المجلد الرئيسي من المسار</span></label>
+      <div class="field"><input id="gRepo" placeholder="username/repo" aria-label="المستودع"></div>
+      <div class="field"><input id="gBranch" value="main" aria-label="الفرع"><input id="gDirIn" placeholder="مجلد داخل المستودع (اختياري)" aria-label="المجلد"></div>
+      <div class="field"><input id="gMsg" value="رفع ملفات من الموقع" aria-label="رسالة commit" style="direction:rtl"></div>
+      <div class="field"><input id="gTok" type="password" placeholder="Token (لا يتم حفظه)" autocomplete="off" aria-label="Token"></div>
+      <p class="stats" style="margin:0 0 10px">لو فيه ملف بنفس المسار في المستودع هيتم استبداله. كل الملفات بتترفع في commit واحد.</p>
+      <button class="main" id="gGo">رفع على GitHub</button>
+      <button id="gClear">مسح</button>
+      <progress id="gProg" max="100" value="0"></progress>
+    </div>
+    <div id="gmsg" role="alert" style="margin-top:10px;min-height:1.4em"></div>
   </div>
 </main>
 
@@ -306,14 +334,17 @@ progress{width:100%;height:8px;margin-top:10px;display:none}
 
   // ---- ضغط الملفات ----
   var picked = [];
-  function setTab(ex){
-    $('ex').style.display = ex ? '' : 'none';
-    $('cp').style.display = ex ? 'none' : '';
-    $('tEx').classList.toggle('on', ex);
-    $('tCp').classList.toggle('on', !ex);
+  function setTab(t){
+    $('ex').style.display = t === 'ex' ? '' : 'none';
+    $('cp').style.display = t === 'cp' ? '' : 'none';
+    $('gh').style.display = t === 'gh' ? '' : 'none';
+    $('tEx').classList.toggle('on', t === 'ex');
+    $('tCp').classList.toggle('on', t === 'cp');
+    $('tGh').classList.toggle('on', t === 'gh');
   }
-  $('tEx').onclick = function(){ setTab(true); };
-  $('tCp').onclick = function(){ setTab(false); };
+  $('tEx').onclick = function(){ setTab('ex'); };
+  $('tCp').onclick = function(){ setTab('cp'); };
+  $('tGh').onclick = function(){ setTab('gh'); };
   $('pFiles').onclick = function(){ $('cFiles').click(); };
   $('pDir').onclick = function(){ $('cDir').click(); };
   function add(list){
@@ -365,6 +396,149 @@ progress{width:100%;height:8px;margin-top:10px;display:none}
     }
     b.disabled = false; pr.style.display = 'none';
   };
+
+  // ---- رفع على GitHub ----
+  var gItems = [];
+  var SKIP = /(^|\/)(__MACOSX|\.DS_Store|Thumbs\.db)(\/|$)/;
+  function gsay(t, ok){ var m = $('gmsg'); m.style.color = ok ? 'var(--acc)' : '#ff8a80'; m.textContent = t || ''; }
+  $('gZip').onclick = function(){ $('gzIn').click(); };
+  $('gFiles').onclick = function(){ $('gfIn').click(); };
+  $('gDir').onclick = function(){ $('gdIn').click(); };
+  $('gzIn').onchange = async function(){
+    var f = this.files[0]; this.value = '';
+    if(!f) return;
+    if(typeof JSZip === 'undefined'){ gsay('تعذر تحميل مكتبة فك الضغط. تأكد من الاتصال بالإنترنت.'); return; }
+    try{
+      var z = await JSZip.loadAsync(f);
+      gItems = [];
+      z.forEach(function(p, o){ if(!o.dir && !SKIP.test(p)) gItems.push({path:p, get:function(){ return o.async('blob'); }, size:0}); });
+      for(var i=0;i<gItems.length;i++){ gItems[i].size = (await gItems[i].get()).size; }
+      gDraw(f.name.replace(/\.zip$/i,''));
+    }catch(e){ gsay('الملف ده مش ZIP سليم.'); }
+  };
+  function gAddFiles(list){
+    gItems = [];
+    Array.prototype.forEach.call(list, function(f){
+      var p = f.webkitRelativePath || f.name;
+      if(!SKIP.test(p)) gItems.push({path:p, get:function(){ return Promise.resolve(f); }, size:f.size});
+    });
+    gDraw('');
+  }
+  $('gfIn').onchange = function(){ gAddFiles(this.files); this.value = ''; };
+  $('gdIn').onchange = function(){ gAddFiles(this.files); this.value = ''; };
+  function gRoot(){
+    if(!gItems.length) return '';
+    var r = gItems[0].path.split('/')[0];
+    return gItems.every(function(x){ return x.path.indexOf('/') > -1 && x.path.split('/')[0] === r; }) ? r : '';
+  }
+  function gDraw(){
+    gsay('');
+    $('gBox').style.display = gItems.length ? 'block' : 'none';
+    var tot = gItems.reduce(function(s,x){return s + x.size}, 0);
+    $('gStats').textContent = gItems.length + ' ملف، الحجم ' + size(tot);
+    var r = gRoot();
+    $('gStrip').checked = !!r; $('gStrip').disabled = !r;
+    $('gStripT').textContent = r ? 'إزالة المجلد الرئيسي (' + r + ') من المسار' : 'لا يوجد مجلد رئيسي مشترك';
+    try{ if(!$('gRepo').value) $('gRepo').value = localStorage.getItem('gh_repo') || ''; }catch(e){}
+  }
+  $('gClear').onclick = function(){ gItems = []; gDraw(); };
+
+  function b64(blob){
+    return new Promise(function(res, rej){
+      var r = new FileReader();
+      r.onload = function(){ res(String(r.result).split(',')[1] || ''); };
+      r.onerror = function(){ rej(new Error('تعذر قراءة الملف')); };
+      r.readAsDataURL(blob);
+    });
+  }
+  async function api(tok, method, url, body){
+    var res = await fetch('https://api.github.com' + url, {
+      method: method,
+      headers: {'Authorization':'Bearer ' + tok, 'Accept':'application/vnd.github+json', 'X-GitHub-Api-Version':'2022-11-28', 'Content-Type':'application/json'},
+      body: body ? JSON.stringify(body) : undefined
+    });
+    var data = null; try{ data = await res.json(); }catch(e){}
+    if(!res.ok){
+      var err = new Error((data && data.message) || ('HTTP ' + res.status)); err.status = res.status; throw err;
+    }
+    return data;
+  }
+  function explain(e){
+    if(e.status === 401) return 'الـ Token غلط أو منتهي.';
+    if(e.status === 403) return 'الـ Token معندوش صلاحية، أو فيه حد أقصى للطلبات. تأكد من Contents: Read and write.';
+    if(e.status === 404) return 'المستودع أو الفرع مش موجود، أو الـ Token مش مديله صلاحية على المستودع ده.';
+    return 'حصل خطأ: ' + e.message;
+  }
+
+  $('gGo').onclick = async function(){
+    var repo = $('gRepo').value.trim().replace(/^https?:\/\/github\.com\//,'').replace(/\.git$/,'').replace(/\/$/,'');
+    var branch = $('gBranch').value.trim() || 'main';
+    var tok = $('gTok').value.trim();
+    var msg = $('gMsg').value.trim() || 'رفع ملفات';
+    var folder = $('gDirIn').value.trim().replace(/^\/+|\/+$/g,'');
+    if(!/^[\w.-]+\/[\w.-]+$/.test(repo)){ gsay('اكتب المستودع بالشكل: username/repo'); return; }
+    if(!tok){ gsay('لصق الـ Token الأول.'); return; }
+    var strip = $('gStrip').checked ? gRoot() : '';
+    var files = gItems.map(function(x){
+      var p = x.path; if(strip) p = p.slice(strip.length + 1);
+      if(folder) p = folder + '/' + p;
+      return {path:p, get:x.get, size:x.size};
+    });
+    var big = files.filter(function(f){ return f.size > 100*1024*1024; });
+    if(big.length){ gsay('الملف ' + big[0].path + ' أكبر من 100MB وGitHub مش بيقبله.'); return; }
+    try{ localStorage.setItem('gh_repo', repo); }catch(e){}
+
+    var btn = $('gGo'), pr = $('gProg'); btn.disabled = true; pr.style.display = 'block'; pr.value = 0;
+    try{
+      var base = '/repos/' + repo;
+      var head = null;
+      try{
+        head = await api(tok, 'GET', base + '/git/ref/heads/' + encodeURIComponent(branch));
+      }catch(e){
+        if(e.status === 409 || e.status === 404){
+          // مستودع فاضي: ننشئ أول ملف عن طريق contents API عشان يتكون الفرع
+          if(e.status === 404){
+            try{ await api(tok, 'GET', base); }catch(e2){ throw e2; }
+          }
+          var first = files.shift();
+          if(!first) throw e;
+          gsay('المستودع فاضي، بيتم إنشاء الفرع...', true);
+          await api(tok, 'PUT', base + '/contents/' + first.path.split('/').map(encodeURIComponent).join('/'),
+            {message: msg, content: await b64(await first.get()), branch: branch});
+          head = await api(tok, 'GET', base + '/git/ref/heads/' + encodeURIComponent(branch));
+          if(!files.length){ done(repo, branch, folder); return; }
+        }else throw e;
+      }
+      var parent = head.object.sha;
+      var pc = await api(tok, 'GET', base + '/git/commits/' + parent);
+      var tree = [], n = 0, idx = 0;
+      async function worker(){
+        while(idx < files.length){
+          var f = files[idx++];
+          var blob = await api(tok, 'POST', base + '/git/blobs', {content: await b64(await f.get()), encoding:'base64'});
+          tree.push({path:f.path, mode:'100644', type:'blob', sha:blob.sha});
+          n++; pr.value = Math.round(n / files.length * 90);
+          gsay('جاري رفع الملفات ' + n + '/' + files.length, true);
+        }
+      }
+      await Promise.all([worker(), worker(), worker(), worker()]);
+      var nt = await api(tok, 'POST', base + '/git/trees', {base_tree: pc.tree.sha, tree: tree});
+      var nc = await api(tok, 'POST', base + '/git/commits', {message: msg, tree: nt.sha, parents: [parent]});
+      await api(tok, 'PATCH', base + '/git/refs/heads/' + encodeURIComponent(branch), {sha: nc.sha});
+      pr.value = 100;
+      done(repo, branch, folder);
+    }catch(e){
+      gsay(explain(e));
+    }
+    btn.disabled = false; pr.style.display = 'none';
+  };
+  function done(repo, branch, folder){
+    var url = 'https://github.com/' + repo + '/tree/' + branch + (folder ? '/' + folder : '');
+    var m = $('gmsg'); m.style.color = 'var(--acc)'; m.textContent = 'تم الرفع بنجاح. ';
+    var a = document.createElement('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'افتح المستودع';
+    a.style.color = 'var(--acc)'; m.appendChild(a);
+    $('gGo').disabled = false; $('gProg').style.display = 'none';
+  }
 })();
 </script>
 </body>
