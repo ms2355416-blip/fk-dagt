@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>فك ضغط ZIP</title>
+<style>
+:root{--bg:#101214;--panel:#181b1f;--line:#2a2f35;--text:#eceff1;--mute:#8d969e;--acc:#3ddc84;--accd:#0f2a1c}
+@media (prefers-color-scheme:light){:root{--bg:#f4f6f5;--panel:#fff;--line:#d9dedc;--text:#14181b;--mute:#5d676f;--acc:#0a7d3e;--accd:#dff3e8}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;line-height:1.7}
+main{max-width:720px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:1.5rem;margin:8px 0 4px}
+p.sub{color:var(--mute);margin:0 0 18px}
+#drop{border:2px dashed var(--line);border-radius:14px;padding:34px 16px;text-align:center;cursor:pointer;background:var(--panel)}
+#drop.over{border-color:var(--acc);background:var(--accd)}
+#drop b{display:block;font-size:1.05rem}
+#drop span{color:var(--mute);font-size:.9rem}
+button,.btn{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:10px;padding:8px 14px}
+button.main{background:var(--acc);color:#04130a;border-color:var(--acc);font-weight:700}
+button:disabled{opacity:.5}
+button:focus-visible,#drop:focus-visible,input:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+#result{display:none;margin-top:22px}
+.head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.head h2{margin:0;font-size:1.1rem;word-break:break-all}
+.stats{color:var(--mute);font-size:.9rem;margin:2px 0 14px}
+.choices{display:grid;gap:12px;grid-template-columns:1fr 1fr}
+@media (max-width:520px){.choices{grid-template-columns:1fr}}
+.choice{border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--panel)}
+.choice h3{margin:0 0 4px;font-size:1rem}
+.choice p{margin:0 0 12px;color:var(--mute);font-size:.9rem}
+#sepBox{display:none;margin-top:16px}
+input[type=search]{width:100%;font:inherit;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text);margin-bottom:12px}
+details{border:1px solid var(--line);border-radius:10px;background:var(--panel);margin-bottom:8px}
+summary{padding:10px 12px;cursor:pointer;display:flex;justify-content:space-between;gap:8px;align-items:center}
+summary .t{font-weight:600}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid var(--line)}
+.name{min-width:0;word-break:break-all}
+.name small{display:block;color:var(--mute)}
+.acts{display:flex;gap:6px;flex-shrink:0}
+.acts button{padding:5px 10px;font-size:.85rem}
+#prev{display:none;margin-top:14px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+#prev header{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);gap:8px}
+#prev pre{margin:0;padding:12px;max-height:340px;overflow:auto;direction:ltr;text-align:left;font-size:.82rem;white-space:pre-wrap;word-break:break-all}
+#msg{color:#ff8a80;margin-top:10px;min-height:1.4em}
+</style>
+</head>
+<body>
+<main>
+  <h1>فك ضغط ملفات ZIP</h1>
+  <p class="sub">كل شيء يتم على جهازك. لا يتم رفع أي ملف لأي سيرفر.</p>
+
+  <div id="drop" tabindex="0" role="button" aria-label="اختر ملف ZIP">
+    <b>اسحب ملف ZIP هنا أو اضغط للاختيار</b>
+    <span>ملف .zip فقط</span>
+    <input id="file" type="file" accept=".zip,application/zip" hidden>
+  </div>
+  <div id="msg" role="alert"></div>
+
+  <section id="result">
+    <div class="head"><h2 id="zname"></h2><button id="reset">ملف جديد</button></div>
+    <div class="stats" id="stats"></div>
+
+    <div class="choices">
+      <div class="choice">
+        <h3>الخيار الأول: ملف كامل</h3>
+        <p>تحميل كل المحتويات في ملف ZIP واحد بعد فك الضغط.</p>
+        <button class="main" id="dlAll">تحميل الكل</button>
+      </div>
+      <div class="choice">
+        <h3>الخيار الثاني: ملفات منفصلة</h3>
+        <p>عرض كل الملفات والمجلدات مع تحميل كل ملف لوحده.</p>
+        <button class="main" id="showSep">عرض الملفات</button>
+      </div>
+    </div>
+
+    <div id="sepBox">
+      <input type="search" id="q" placeholder="ابحث عن ملف بالاسم">
+      <div id="list"></div>
+      <div id="prev">
+        <header><b id="pname" style="direction:ltr"></b><span class="acts"><button id="copy">نسخ</button><button id="closePrev">إغلاق</button></span></header>
+        <pre id="pcode"></pre>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+(function(){
+  var $ = function(id){return document.getElementById(id)};
+  var zip = null, zipName = '', entries = [];
+  var TEXT = /\.(html?|css|js|json|txt|md|xml|svg|csv)$/i;
+
+  function size(n){
+    if(n < 1024) return n + ' B';
+    if(n < 1048576) return (n/1024).toFixed(1) + ' KB';
+    return (n/1048576).toFixed(1) + ' MB';
+  }
+  function say(t){ $('msg').textContent = t || ''; }
+  function save(blob, name){
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+  }
+  function base(p){ return p.split('/').pop(); }
+
+  async function load(file){
+    say('');
+    if(!file) return;
+    if(!/\.zip$/i.test(file.name)){ say('الملف لازم يكون بصيغة ZIP.'); return; }
+    if(typeof JSZip === 'undefined'){ say('تعذر تحميل مكتبة فك الضغط. تأكد من الاتصال بالإنترنت.'); return; }
+    $('drop').textContent = 'جاري فك الضغط...';
+    try{
+      zip = await JSZip.loadAsync(file);
+    }catch(e){
+      location.reload(); return;
+    }
+    zipName = file.name.replace(/\.zip$/i,'');
+    entries = [];
+    zip.forEach(function(path, obj){
+      if(!obj.dir && path.indexOf('__MACOSX/') !== 0) entries.push({path:path, obj:obj, size:0});
+    });
+    for(var i=0;i<entries.length;i++){
+      var u8 = await entries[i].obj.async('uint8array');
+      entries[i].size = u8.length;
+    }
+    var folders = {};
+    entries.forEach(function(e){
+      var parts = e.path.split('/'); parts.pop();
+      var acc = '';
+      parts.forEach(function(p){ acc += p + '/'; folders[acc] = 1; });
+    });
+    var total = entries.reduce(function(s,e){return s + e.size}, 0);
+    $('zname').textContent = file.name;
+    $('stats').textContent = entries.length + ' ملف، ' + Object.keys(folders).length + ' مجلد، الحجم ' + size(total);
+    $('drop').style.display = 'none';
+    $('result').style.display = 'block';
+    $('sepBox').style.display = 'none';
+    render('');
+  }
+
+  function render(filter){
+    var f = filter.trim().toLowerCase();
+    var groups = {};
+    entries.forEach(function(e){
+      if(f && base(e.path).toLowerCase().indexOf(f) === -1) return;
+      var i = e.path.lastIndexOf('/');
+      var dir = i === -1 ? '' : e.path.slice(0, i + 1);
+      (groups[dir] = groups[dir] || []).push(e);
+    });
+    var keys = Object.keys(groups).sort();
+    var out = $('list'); out.innerHTML = '';
+    if(!keys.length){ out.textContent = 'لا توجد نتائج.'; return; }
+    keys.forEach(function(dir){
+      var d = document.createElement('details');
+      d.open = true;
+      var s = document.createElement('summary');
+      var t = document.createElement('span'); t.className = 't';
+      t.textContent = dir ? dir : 'الملفات الرئيسية';
+      t.style.direction = 'ltr';
+      s.appendChild(t);
+      var right = document.createElement('span'); right.className = 'acts';
+      var cnt = document.createElement('small'); cnt.textContent = groups[dir].length + ' ملف';
+      right.appendChild(cnt);
+      if(dir){
+        var fb = document.createElement('button'); fb.textContent = 'تحميل المجلد';
+        fb.onclick = function(ev){ ev.preventDefault(); dlFolder(dir); };
+        right.appendChild(fb);
+      }
+      s.appendChild(right);
+      d.appendChild(s);
+      groups[dir].forEach(function(e){
+        var r = document.createElement('div'); r.className = 'row';
+        var n = document.createElement('div'); n.className = 'name';
+        n.textContent = base(e.path);
+        var sm = document.createElement('small'); sm.textContent = size(e.size);
+        n.appendChild(sm);
+        var a = document.createElement('div'); a.className = 'acts';
+        if(TEXT.test(e.path)){
+          var pb = document.createElement('button'); pb.textContent = 'معاينة';
+          pb.onclick = function(){ preview(e); };
+          a.appendChild(pb);
+        }
+        var db = document.createElement('button'); db.textContent = 'تحميل';
+        db.onclick = async function(){ save(await e.obj.async('blob'), base(e.path)); };
+        a.appendChild(db);
+        r.appendChild(n); r.appendChild(a); d.appendChild(r);
+      });
+      out.appendChild(d);
+    });
+  }
+
+  async function preview(e){
+    var txt = await e.obj.async('string');
+    $('pname').textContent = e.path;
+    $('pcode').textContent = txt.length > 200000 ? txt.slice(0,200000) + '\n... (تم اقتطاع الباقي)' : txt;
+    $('prev').style.display = 'block';
+    $('prev').scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+
+  async function dlFolder(dir){
+    var z = new JSZip();
+    for(var i=0;i<entries.length;i++){
+      if(entries[i].path.indexOf(dir) === 0)
+        z.file(entries[i].path, await entries[i].obj.async('uint8array'));
+    }
+    save(await z.generateAsync({type:'blob'}), dir.replace(/\/$/,'').split('/').pop() + '.zip');
+  }
+
+  $('dlAll').onclick = async function(){
+    var b = $('dlAll'); b.disabled = true; b.textContent = 'جاري التجهيز...';
+    var z = new JSZip();
+    for(var i=0;i<entries.length;i++) z.file(entries[i].path, await entries[i].obj.async('uint8array'));
+    save(await z.generateAsync({type:'blob', compression:'DEFLATE'}), zipName + '-extracted.zip');
+    b.disabled = false; b.textContent = 'تحميل الكل';
+  };
+  $('showSep').onclick = function(){ $('sepBox').style.display = 'block'; $('sepBox').scrollIntoView({behavior:'smooth'}); };
+  $('q').oninput = function(){ render(this.value); };
+  $('closePrev').onclick = function(){ $('prev').style.display = 'none'; };
+  $('copy').onclick = function(){
+    var t = $('pcode').textContent, b = $('copy');
+    var done = function(){ b.textContent = 'تم النسخ'; setTimeout(function(){ b.textContent = 'نسخ'; }, 1500); };
+    if(navigator.clipboard) navigator.clipboard.writeText(t).then(done, function(){ say('تعذر النسخ.'); });
+    else say('المتصفح لا يدعم النسخ.');
+  };
+  $('reset').onclick = function(){ location.reload(); };
+
+  var drop = $('drop'), input = $('file');
+  drop.onclick = function(){ input.click(); };
+  drop.onkeydown = function(e){ if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); input.click(); } };
+  input.onchange = function(){ load(input.files[0]); };
+  ['dragenter','dragover'].forEach(function(ev){ drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.add('over'); }); });
+  ['dragleave','drop'].forEach(function(ev){ drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.remove('over'); }); });
+  drop.addEventListener('drop', function(e){ load(e.dataTransfer.files[0]); });
+})();
+</script>
+</body>
+</html>
